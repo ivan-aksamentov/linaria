@@ -71,6 +71,38 @@ const stripLines = (loc, text) => {
   return result;
 };
 
+// Verify if the binding is imported from the specified source
+const imports = (t, scope, name, source) => {
+  const bindings = scope.getAllBindings();
+  const p = bindings[name];
+
+  if (p && t.isImportSpecifier(p) && t.isImportDeclaration(p.parentPath)) {
+    return p.parentPath.node.source.value === source;
+  }
+
+  if (p && t.isVariableDeclarator(p)) {
+    if (
+      t.isMemberExpression(p.node.init) &&
+      t.isCallExpression(p.node.init.object) &&
+      t.isIdentifier(p.node.init.object.callee) &&
+      p.node.init.object.callee.name === 'require' &&
+      p.node.init.object.arguments.length === 1
+    ) {
+      const node = p.node.init.object.arguments[0];
+
+      if (t.isStringLiteral(node)) {
+        return node.value === source;
+      }
+
+      if (t.isTemplateLiteral(node) && node.quasis.length === 1) {
+        return node.quasis[0].value.cooked === source;
+      }
+    }
+  }
+
+  return false;
+};
+
 // Match any valid CSS units followed by a separator such as ;, newline etc.
 const unitRegex = new RegExp(`^(${units.join('|')})(;|,|\n| |\\))`);
 
@@ -186,24 +218,31 @@ module.exports = function extract(
         const { quasi, tag } = path.node;
 
         let styled;
+        let css;
 
-        if (
-          t.isCallExpression(tag) &&
-          t.isIdentifier(tag.callee) &&
-          tag.arguments.length === 1 &&
-          tag.callee.name === 'styled'
-        ) {
-          styled = { component: path.get('tag').get('arguments')[0] };
-        } else if (
-          t.isMemberExpression(tag) &&
-          t.isIdentifier(tag.object) &&
-          t.isIdentifier(tag.property) &&
-          tag.object.name === 'styled'
-        ) {
-          styled = { component: { node: t.stringLiteral(tag.property.name) } };
+        if (imports(t, path.scope, 'styled', 'linaria/react')) {
+          if (
+            t.isCallExpression(tag) &&
+            t.isIdentifier(tag.callee) &&
+            tag.arguments.length === 1 &&
+            tag.callee.name === 'styled'
+          ) {
+            styled = { component: path.get('tag').get('arguments')[0] };
+          } else if (
+            t.isMemberExpression(tag) &&
+            t.isIdentifier(tag.object) &&
+            t.isIdentifier(tag.property) &&
+            tag.object.name === 'styled'
+          ) {
+            styled = {
+              component: { node: t.stringLiteral(tag.property.name) },
+            };
+          }
+        } else if (imports(t, path.scope, 'css', 'linaria')) {
+          css = t.isIdentifier(tag) && tag.name === 'css';
         }
 
-        if (styled || (t.isIdentifier(tag) && tag.name === 'css')) {
+        if (styled || css) {
           const interpolations = [];
 
           // Try to determine a readable class name
