@@ -24,7 +24,11 @@ const collect = (
     let addedToCritical = false;
 
     rule.each(childRule => {
-      if (childRule.selector.match(htmlClassesRegExp)) {
+      if (
+        childRule &&
+        childRule.selector &&
+        childRule.selector.match(htmlClassesRegExp)
+      ) {
         critical.append(rule.clone());
         addedToCritical = true;
       }
